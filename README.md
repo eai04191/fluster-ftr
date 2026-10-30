@@ -9,7 +9,7 @@ This repository contains:
 - [`tools/ftr.py`](tools/ftr.py): a command-line parser and extractor (Python 3, standard library only).
 - [`tools/pdb_publics.py`](tools/pdb_publics.py): lists the public symbols from Microsoft's PDB at addresses that match the shipped DLL, so the claims in `FORMAT.md` can be checked in any disassembler.
 
-No Microsoft binaries or animation data are included. You need your own copy of Windows Vista.
+No Microsoft binaries or animation data are included; to play the animations yourself you need your own copy of Windows Vista. The only Microsoft-derived material is the set of example renders described below.
 
 ## The animations
 
@@ -24,6 +24,22 @@ No Microsoft binaries or animation data are included. You need your own copy of 
 | `shellstyle.dll` FTR 200, 201 | the Explorer Flare |
 
 The header animations are 400×40 px at 24 fps and loop. The Flare is 273.6×144 px at 30 fps.
+
+## Renders
+
+One loop of each animation, rendered by this player at 4× and encoded frame by frame (VP9 WebM):
+
+| Animation | File |
+| --- | --- |
+| Default | [shell32_200.webm](docs/renders/shell32_200.webm) |
+| Copy | [shell32_201.webm](docs/renders/shell32_201.webm) |
+| Move | [shell32_202.webm](docs/renders/shell32_202.webm) |
+| Apply properties | [shell32_203.webm](docs/renders/shell32_203.webm) |
+| Recycle | [shell32_204.webm](docs/renders/shell32_204.webm) |
+| Delete | [shell32_205.webm](docs/renders/shell32_205.webm) |
+| Explorer Flare | [shellstyle_200.webm](docs/renders/shellstyle_200.webm), [shellstyle_201.webm](docs/renders/shellstyle_201.webm) |
+
+The headers are drawn over the progress dialog's gradient; the Flare over the movie's own background color. These are this player's output, not captures from Windows. The animations themselves are © Microsoft and are not covered by this repository's license.
 
 ## Getting the DLLs
 
@@ -65,4 +81,4 @@ All of the reverse engineering, code and documentation in this repository was do
 
 ## License
 
-[CC0 1.0](LICENSE): dedicated to the public domain. Use, copy, modify and redistribute any of it, for any purpose, without asking or crediting. Windows, its DLLs and the animations inside them remain Microsoft's and are not covered.
+[CC0 1.0](LICENSE): dedicated to the public domain. Use, copy, modify and redistribute any of it, for any purpose, without asking or crediting. Windows, its DLLs and the animations inside them remain Microsoft's and are not covered, and neither are the renders in `docs/renders/`.
