@@ -1,0 +1,7 @@
+__pycache__/
+*.dll
+*.mui
+*.pdb
+*.ftr
+*.wim
+*.iso

@@ -1,0 +1,666 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FTR Player</title>
+<style>
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --text: #1d2330; --muted: #5d6677; --line: #d9dde5;
+  --accent: #1f6fb2; --accent-text: #ffffff; --chip: #eef1f6;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #14171c; --panel: #1c2027; --text: #e6e9ef; --muted: #9aa3b2; --line: #2e343e;
+    --accent: #5aa7e8; --accent-text: #0b1220; --chip: #262b34;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #14171c; --panel: #1c2027; --text: #e6e9ef; --muted: #9aa3b2; --line: #2e343e;
+  --accent: #5aa7e8; --accent-text: #0b1220; --chip: #262b34;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 960px; margin: 0 auto; padding: 24px 16px 48px; }
+h1 { font-size: 22px; margin: 0 0 4px; }
+p.lead { margin: 0 0 20px; color: var(--muted); }
+p.lead a { color: var(--accent); }
+.drop { position: relative; display: block; border: 2px dashed var(--line); border-radius: 12px; padding: 20px; text-align: center; background: var(--panel); cursor: pointer; }
+.drop.over, .drop:focus-within { border-color: var(--accent); }
+.drop input { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; }
+.list { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
+.list button { border: 1px solid var(--line); background: var(--chip); color: var(--text); border-radius: 8px; padding: 6px 12px; font: inherit; cursor: pointer; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.list button[aria-pressed="true"] { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.stage { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+.screen { overflow-x: auto; display: flex; justify-content: center; padding: 8px 0; }
+canvas { display: block; image-rendering: auto; }
+.controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 12px; }
+.controls button, .controls select { font: inherit; border: 1px solid var(--line); background: var(--chip); color: var(--text); border-radius: 8px; padding: 4px 10px; cursor: pointer; }
+.controls label { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+input[type=range] { flex: 1 1 200px; min-width: 0; accent-color: var(--accent); }
+.frame { font-variant-numeric: tabular-nums; color: var(--muted); min-width: 9ch; }
+.info { margin-top: 12px; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.err { color: #c0392b; }
+.empty { color: var(--muted); text-align: center; padding: 24px 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>FTR Player</h1>
+  <p class="lead">Plays the Fluster (FTR) vector animations embedded in Windows Vista’s shell32.dll and shellstyle.dll: the file-operation dialog headers and the Explorer Flare. Drop a DLL or an extracted .ftr file. Files never leave your browser. <a href="FORMAT.md">Format specification</a></p>
+
+  <label class="drop" id="drop">
+    <input type="file" id="file" multiple>
+    <strong>Drop shell32.dll, shellstyle.dll or .ftr files</strong><br>
+    <span style="color:var(--muted)">or click to choose</span>
+  </label>
+
+  <div class="list" id="list"></div>
+
+  <section class="stage">
+    <div class="screen"><canvas id="cv" width="400" height="40"></canvas></div>
+    <p class="empty" id="empty">No animation loaded yet.</p>
+    <div class="controls">
+      <button id="play" type="button">Play</button>
+      <button id="step" type="button">Step</button>
+      <input type="range" id="seek" min="0" max="0" value="0" aria-label="Frame">
+      <span class="frame" id="frame">0 / 0</span>
+    </div>
+    <div class="controls">
+      <label><input type="checkbox" id="loop" checked> Loop</label>
+      <label>Zoom <select id="scale"><option>1</option><option selected>2</option><option>3</option><option>4</option></select></label>
+      <label>Background <select id="bgsel">
+        <option value="header">Progress dialog header</option>
+        <option value="movie">FTR background color (SetBackgroundColor)</option>
+        <option value="checker">Transparent (checkerboard)</option>
+        <option value="black">Black</option>
+        <option value="white">White</option>
+      </select></label>
+      <button id="png" type="button">Save frame as PNG</button>
+      <button id="webm" type="button">Save one loop as WebM</button>
+    </div>
+    <div class="info" id="info"></div>
+  </section>
+</main>
+<script>
+'use strict';
+
+// ---- PE resource reader ---------------------------------------------------
+function readPEResources(buf) {
+  const dv = new DataView(buf);
+  if (dv.getUint16(0, true) !== 0x5a4d) return null;
+  const pe = dv.getUint32(0x3c, true);
+  if (dv.getUint32(pe, true) !== 0x4550) return null;
+  const nsec = dv.getUint16(pe + 6, true), optsz = dv.getUint16(pe + 20, true), opt = pe + 24;
+  const magic = dv.getUint16(opt, true);
+  const dd = opt + (magic === 0x10b ? 96 : 112);
+  const rsrcRva = dv.getUint32(dd + 16, true);
+  const secs = [];
+  for (let i = 0, so = opt + optsz; i < nsec; i++, so += 40) {
+    secs.push({ vsz: dv.getUint32(so + 8, true), va: dv.getUint32(so + 12, true), rsz: dv.getUint32(so + 16, true), ptr: dv.getUint32(so + 20, true) });
+  }
+  const rva2off = rva => {
+    for (const s of secs) if (rva >= s.va && rva < s.va + Math.max(s.vsz, s.rsz)) return rva - s.va + s.ptr;
+    throw new Error('RVA out of range');
+  };
+  const base = rva2off(rsrcRva);
+  const nameOf = v => {
+    if (!(v & 0x80000000)) return v;
+    const o = base + (v & 0x7fffffff), n = dv.getUint16(o, true);
+    let s = '';
+    for (let i = 0; i < n; i++) s += String.fromCharCode(dv.getUint16(o + 2 + i * 2, true));
+    return s;
+  };
+  const out = [];
+  const walk = (off, path) => {
+    const n = dv.getUint16(base + off + 12, true) + dv.getUint16(base + off + 14, true);
+    for (let i = 0; i < n; i++) {
+      const e = base + off + 16 + i * 8;
+      const key = nameOf(dv.getUint32(e, true)), tgt = dv.getUint32(e + 4, true);
+      if (tgt & 0x80000000) walk(tgt & 0x7fffffff, path.concat([key]));
+      else {
+        const rva = dv.getUint32(base + tgt, true), size = dv.getUint32(base + tgt + 4, true), o = rva2off(rva);
+        out.push({ type: path[0], name: path[1], lang: key, data: buf.slice(o, o + size) });
+      }
+    }
+  };
+  walk(0, []);
+  return out;
+}
+
+// ---- FTR parser (mirrors SWF::SWF::read in shell32.dll) -------------------
+class Reader {
+  constructor(buf) { this.dv = new DataView(buf); this.o = 0; }
+  u8() { return this.dv.getUint8(this.o++); }
+  u16() { const v = this.dv.getUint16(this.o, true); this.o += 2; return v; }
+  u32() { const v = this.dv.getUint32(this.o, true); this.o += 4; return v; }
+  i32() { const v = this.dv.getInt32(this.o, true); this.o += 4; return v; }
+  f32() { const v = this.dv.getFloat32(this.o, true); this.o += 4; return v; }
+  f64() { const v = this.dv.getFloat64(this.o, true); this.o += 8; return v; }
+  color() { return [this.u8(), this.u8(), this.u8(), this.u8()]; }  // R, G, B, A
+  matrix() { return [this.f32(), this.f32(), this.f32(), this.f32(), this.f32(), this.f32()]; }
+  list(fn) { const n = this.u32(), a = []; for (let i = 0; i < n; i++) a.push(fn()); return a; }
+}
+
+const BRUSH_SOLID = 0, BRUSH_PATH_GRADIENT = 3, BRUSH_LINEAR_GRADIENT = 4;
+
+function readBrush(r) {
+  const type = r.u32();
+  if (type === BRUSH_SOLID) return { type, color: r.color() };
+  if (type === BRUSH_PATH_GRADIENT || type === BRUSH_LINEAR_GRADIENT) {
+    const stops = r.list(() => ({ color: r.color(), pos: r.f32() }));
+    return { type, stops, matrix: r.matrix() };
+  }
+  throw new Error(`unsupported brush type ${type} at offset 0x${(r.o - 4).toString(16)}`);
+}
+
+function readShape(r) {
+  return {
+    pens: r.list(() => ({ color: r.color(), width: r.f32() })),
+    brushes: r.list(() => readBrush(r)),
+    paths: r.list(() => r.list(() => [r.f32(), r.f32(), r.u8()])),
+    actions: r.list(() => [r.u32(), r.i32()]),
+  };
+}
+
+function readTag(r) {
+  const at = r.o, id = r.u32();
+  switch (id) {
+    case 1: return { tag: 'ShowFrame' };
+    case 9: return { tag: 'SetBackgroundColor', color: r.color() };
+    case 2: case 22: case 32: return { tag: 'DefineShape', id: r.u16(), shape: readShape(r) };
+    case 39: return { tag: 'DefineSprite', id: r.u16(), tags: r.list(() => readTag(r)) };
+    case 26: {
+      const t = { tag: 'PlaceObject2', hasClipDepth: r.u8(), hasColorTransform: r.u8(), hasMatrix: r.u8(), hasCharacter: r.u8(), flag: r.u8(),
+                  depth: r.u16(), charId: r.u16(), clipDepth: r.u16() };
+      if (t.hasMatrix) t.matrix = r.matrix();
+      if (t.hasColorTransform) t.cx = [r.f32(), r.f32(), r.f32(), r.f32(), r.f32(), r.f32(), r.f32(), r.f32()]; // mulR, addR, mulG, addG, mulB, addB, mulA, addA
+      return t;
+    }
+    case 28: return { tag: 'RemoveObject2', depth: r.u16() };
+    case 12: return { tag: 'DoAction', action: r.u32(), frame: r.u16() };
+    default: throw new Error(`unsupported tag ${id} at offset 0x${at.toString(16)}`);
+  }
+}
+
+function parseFTR(buf) {
+  const r = new Reader(buf);
+  const rect = [r.i32(), r.i32(), r.i32(), r.i32()];
+  const fps = r.f64();
+  if (!(Number.isFinite(fps) && fps > 0)) throw new Error(`invalid frame rate ${fps}`);
+  const tags = r.list(() => readTag(r));
+  if (r.o !== buf.byteLength) throw new Error(`${buf.byteLength - r.o} trailing bytes left over`);
+  return { rect, fps, tags };
+}
+
+// ---- Engine (mirrors SWF::Movie) ------------------------------------------
+const PT_START = 0, PT_LINE = 1, PT_BEZIER = 3, PT_TYPE_MASK = 7, PT_CLOSE = 0x80;
+
+function buildPath(points) {
+  const p = new Path2D();
+  for (let i = 0; i < points.length; i++) {
+    const [x, y, t] = points[i];
+    const kind = t & PT_TYPE_MASK;
+    if (kind === PT_START) p.moveTo(x, y);
+    else if (kind === PT_LINE) p.lineTo(x, y);
+    else if (kind === PT_BEZIER) {
+      const b = points[i + 1], c = points[i + 2];
+      p.bezierCurveTo(x, y, b[0], b[1], c[0], c[1]);
+      i += 2;
+      if (c[2] & PT_CLOSE) p.closePath();
+      continue;
+    }
+    if (t & PT_CLOSE) p.closePath();
+  }
+  return p;
+}
+
+class Timeline {
+  constructor(commands) {
+    this.commands = commands;
+    let max = 0;
+    for (const c of commands) if (c.depth !== undefined) max = Math.max(max, c.depth, c.clipDepth || 0);
+    this.size = max + 1;
+    this.index = 0;
+    this.resetDisplayList();
+  }
+  resetDisplayList() {
+    this.defs = new Array(this.size).fill(null);
+    this.xf = new Array(this.size).fill(null);
+    this.cx = new Array(this.size).fill(null);
+    this.clip = new Array(this.size).fill(-1);
+  }
+  // Movie::advanceFrame
+  advance(movie, paused, loop) {
+    let ended = false;
+    if (!paused) {
+      if (this.index === 0) this.resetDisplayList();
+      for (let guard = 0; this.commands.length && guard < 100000; guard++) {
+        const cmd = this.commands[this.index];
+        if (this.index >= this.commands.length - 1) { if (loop) this.index = 0; ended = true; }
+        else this.index++;
+        if (!movie.execute(cmd, this)) break;
+      }
+    }
+    for (let d = 0; d < this.size; d++) {
+      const def = this.defs[d];
+      if (def && def.kind === 'sprite') def.timeline.advance(movie, false, loop);
+    }
+    return ended;
+  }
+}
+
+class Movie {
+  constructor(ftr) {
+    this.ftr = ftr;
+    this.defs = [];
+    this.bg = null;
+    const rootCmds = [];
+    for (const t of ftr.tags) {
+      if (t.tag === 'DefineShape') this.defs[t.id] = this.makeShape(t.shape);
+      else if (t.tag === 'DefineSprite') this.defs[t.id] = { kind: 'sprite', timeline: new Timeline(t.tags) };
+      else rootCmds.push(t);
+    }
+    this.root = new Timeline(rootCmds);
+    this.frameCount = rootCmds.filter(t => t.tag === 'ShowFrame').length;
+  }
+  makeShape(s) {
+    const paths = s.paths.map(buildPath);
+    const mask = new Path2D();
+    for (const [type, i] of s.actions) if (type === 2) mask.addPath(paths[i]);
+    return { kind: 'shape', pens: s.pens, brushes: s.brushes, paths, actions: s.actions, mask };
+  }
+  rewind() {
+    this.root.index = 0; this.root.resetDisplayList();
+    for (const d of this.defs) if (d && d.kind === 'sprite') { d.timeline.index = 0; d.timeline.resetDisplayList(); }
+  }
+  execute(c, tl) {
+    switch (c.tag) {
+      case 'ShowFrame': return false;
+      case 'SetBackgroundColor': this.bg = c.color; return true;
+      case 'PlaceObject2': {
+        const def = c.hasCharacter ? this.defs[c.charId] : tl.defs[c.depth];
+        if (!def) return true;
+        if (c.hasCharacter) { tl.clip[c.depth] = -1; tl.defs[c.depth] = def; }
+        if (c.hasMatrix) tl.xf[c.depth] = c.matrix;
+        if (c.hasColorTransform) tl.cx[c.depth] = c.cx;
+        if (c.hasClipDepth) tl.clip[c.depth] = c.clipDepth;
+        return true;
+      }
+      case 'RemoveObject2': tl.defs[c.depth] = null; tl.clip[c.depth] = -1; return true;
+      case 'DoAction':
+        if (c.action === 1) {
+          tl.resetDisplayList();
+          for (let i = 0; i <= c.frame; i++) tl.advance(this, false, true);
+        }
+        return true;
+    }
+    return true;
+  }
+}
+
+// ---- Renderer (mirrors SWF::Movie::render on GDI+) --------------------------
+// Graphics::apply(Color, ColorMatrix): only the diagonal and the translation row are used.
+function composeCx(parent, child) {
+  const r = new Array(8);
+  for (let i = 0; i < 4; i++) {
+    r[i * 2] = parent[i * 2] * child[i * 2];
+    r[i * 2 + 1] = parent[i * 2 + 1] * child[i * 2] + child[i * 2 + 1];
+  }
+  return r;
+}
+function clampByte(v) { return v > 0 ? (v < 255 ? Math.trunc(v) : 255) : 0; }
+function applyCx(c, cx) {
+  if (!cx) return c;
+  return [clampByte(c[0] * cx[0] + cx[1]), clampByte(c[1] * cx[2] + cx[3]), clampByte(c[2] * cx[4] + cx[5]), clampByte(c[3] * cx[6] + cx[7])];
+}
+const css = c => `rgba(${c[0]},${c[1]},${c[2]},${c[3] / 255})`;
+
+const GRADIENT_HALF = 16384;  // Types::GRADIENT_SQUARE_DIMENSION
+const STRIP = 1024;
+const stripCanvas = document.createElement('canvas');
+stripCanvas.width = STRIP * 2; stripCanvas.height = 1;
+const stripCtx = stripCanvas.getContext('2d');
+const stripImg = stripCtx.createImageData(STRIP * 2, 1);
+
+// GDI+ interpolates preset blend colors in straight (non-premultiplied) ARGB.
+function sampleStops(stops, t) {
+  if (t <= stops[0].pos) return stops[0].color;
+  for (let i = 1; i < stops.length; i++) {
+    const a = stops[i - 1], b = stops[i];
+    if (t <= b.pos) {
+      const k = b.pos > a.pos ? (t - a.pos) / (b.pos - a.pos) : 1;
+      return [0, 1, 2, 3].map(j => a.color[j] + (b.color[j] - a.color[j]) * k);
+    }
+  }
+  return stops[stops.length - 1].color;
+}
+
+class Renderer {
+  constructor(ctx) { this.ctx = ctx; }
+  frame(movie, scale) {
+    const ctx = this.ctx, [x, y] = movie.ftr.rect;
+    this.clips = [];
+    ctx.save();
+    ctx.scale(scale / 20, scale / 20);
+    ctx.translate(-x, -y);
+    this.timeline(movie.root, null);
+    ctx.restore();
+  }
+  timeline(tl, parentCx) {
+    const ctx = this.ctx, ranges = [];
+    for (let d = 0; d < tl.size; d++) {
+      const def = tl.defs[d];
+      if (def) {
+        ctx.save();
+        if (tl.xf[d]) ctx.transform(...tl.xf[d]);
+        if (tl.clip[d] !== -1) {
+          if (def.kind === 'shape') {
+            if (ranges.length === 0) this.clips = [];
+            ranges.push({ depth: d, until: tl.clip[d] });
+            this.clips.push({ path: def.mask, m: ctx.getTransform() });
+          }
+        } else {
+          const own = tl.cx[d];
+          const cx = own ? (parentCx ? composeCx(parentCx, own) : own) : parentCx;
+          if (def.kind === 'shape') this.shape(def, cx);
+          else this.timeline(def.timeline, cx);
+        }
+        ctx.restore();
+      }
+      // Movie::removeMasks
+      let removed = false;
+      for (let i = ranges.length - 1; i >= 0; i--) if (ranges[i].until <= d) { ranges.splice(i, 1); removed = true; }
+      if (removed) {
+        this.clips = [];
+        for (const r of ranges) {
+          ctx.save();
+          if (tl.xf[r.depth]) ctx.transform(...tl.xf[r.depth]);
+          if (tl.defs[r.depth] && tl.defs[r.depth].kind === 'shape') this.clips.push({ path: tl.defs[r.depth].mask, m: ctx.getTransform() });
+          ctx.restore();
+        }
+      }
+    }
+  }
+  withClip(fn) {
+    const ctx = this.ctx;
+    if (!this.clips.length) return fn();
+    ctx.save();
+    const m = ctx.getTransform();
+    for (const c of this.clips) { ctx.setTransform(c.m); ctx.clip(c.path, 'evenodd'); }
+    ctx.setTransform(m);
+    fn();
+    ctx.restore();
+  }
+  shape(def, cx) {
+    let pen = null, brush = null;
+    for (const [type, i] of def.actions) {
+      if (type === 0) pen = i === -1 ? null : def.pens[i];
+      else if (type === 1) brush = i === -1 ? null : def.brushes[i];
+      else if (type === 2) {
+        const path = def.paths[i];
+        if (brush) this.withClip(() => this.fill(path, brush, cx));
+        if (pen) this.withClip(() => this.stroke(path, pen, cx));
+      }
+    }
+  }
+  stroke(path, pen, cx) {
+    const ctx = this.ctx;
+    ctx.strokeStyle = css(applyCx(pen.color, cx));
+    ctx.lineWidth = pen.width;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'miter';
+    ctx.stroke(path);
+  }
+  fill(path, b, cx) {
+    const ctx = this.ctx;
+    if (b.type === BRUSH_SOLID) {
+      ctx.fillStyle = css(applyCx(b.color, cx));
+      ctx.fill(path, 'evenodd');
+      return;
+    }
+    const m = new DOMMatrix(b.matrix);
+    if (m.a * m.d - m.b * m.c === 0) return;
+    const stops = b.stops.map(s => ({ pos: s.pos, color: applyCx(s.color, cx) }));
+    if (b.type === BRUSH_LINEAR_GRADIENT) {
+      // LinearGradientBrush((-16384,0)-(16384,0)) with WrapModeTileFlipXY: a forward strip followed by a mirrored one.
+      const px = stripImg.data;
+      for (let i = 0; i < STRIP; i++) {
+        const c = sampleStops(stops, (i + 0.5) / STRIP);
+        for (const j of [i, STRIP * 2 - 1 - i]) {
+          px[j * 4] = c[0]; px[j * 4 + 1] = c[1]; px[j * 4 + 2] = c[2]; px[j * 4 + 3] = c[3];
+        }
+      }
+      stripCtx.putImageData(stripImg, 0, 0);
+      const pat = ctx.createPattern(stripCanvas, 'repeat');
+      pat.setTransform(m.multiply(new DOMMatrix([2 * GRADIENT_HALF / STRIP, 0, 0, 1, -GRADIENT_HALF, 0])));
+      ctx.fillStyle = pat;
+      ctx.fill(path, 'evenodd');
+    } else {
+      // PathGradientBrush on the ellipse (-16384,-16384,32768,32768): position 0 is the boundary, 1 the center,
+      // and nothing is painted outside the ellipse (WrapModeClamp).
+      ctx.save();
+      ctx.clip(path, 'evenodd');
+      ctx.transform(b.matrix[0], b.matrix[1], b.matrix[2], b.matrix[3], b.matrix[4], b.matrix[5]);
+      const g = ctx.createRadialGradient(0, 0, 0, 0, 0, GRADIENT_HALF);
+      const N = 64;
+      for (let i = 0; i <= N; i++) g.addColorStop(i / N, css(sampleStops(stops, 1 - i / N)));
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(0, 0, GRADIENT_HALF, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+}
+
+// ---- UI ---------------------------------------------------------------------
+const SHELL32_NAMES = {
+  200: 'Default (calculating, downloading, searching, …)',
+  201: 'Copy',
+  202: 'Move',
+  203: 'Apply properties',
+  204: 'Recycle',
+  205: 'Delete',
+};
+const $ = id => document.getElementById(id);
+const cv = $('cv'), ctx = cv.getContext('2d');
+const renderer = new Renderer(ctx);
+const items = [];
+let cur = null, frame = 0, playing = false, last = 0, acc = 0, recording = null;
+
+function label(file, name, ftr) {
+  const isHeader = ftr.rect[2] === 8000 && ftr.rect[3] === 800;
+  if (/shell32/i.test(file) && isHeader && SHELL32_NAMES[name]) return `${SHELL32_NAMES[name]} (#${name})`;
+  if (/shellstyle/i.test(file)) return `Explorer Flare (#${name})`;
+  return `${file} #${name}`;
+}
+
+async function addFiles(files) {
+  const errs = [];
+  for (const f of files) {
+    const buf = await f.arrayBuffer();
+    try {
+      const res = readPEResources(buf);
+      // A loose file is named like "200_1033.bin" (resource ID_language) or "shell32_200.ftr" (trailing resource ID).
+      const id = (f.name.match(/^(\d+)_\d+\.[^.]*$/) || f.name.match(/(\d+)(?:\.[^.]*)?$/) || [])[1] || f.name;
+      const ftrs = res ? res.filter(r => r.type === 'FTR') : [{ name: Number(id) || id, data: buf }];
+      if (res && !ftrs.length) { errs.push(`${f.name}: no FTR resources`); continue; }
+      for (const r of ftrs) {
+        const ftr = parseFTR(r.data);
+        items.push({ title: label(f.name, r.name, ftr), source: f.name, id: r.name, ftr });
+      }
+    } catch (e) { errs.push(`${f.name}: ${e.message}`); }
+  }
+  renderList();
+  if (!cur && items.length) select(0);
+  for (const e of errs) {
+    const div = document.createElement('div');
+    div.className = 'err';
+    div.textContent = e;
+    $('info').appendChild(div);
+  }
+}
+
+function renderList() {
+  const list = $('list');
+  list.textContent = '';
+  items.forEach((it, i) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = it.title;
+    b.title = `${it.source} / FTR ${it.id}`;
+    b.setAttribute('aria-pressed', String(cur === it));
+    b.onclick = () => select(i);
+    list.appendChild(b);
+  });
+}
+
+function select(i) {
+  const it = items[i];
+  cur = it;
+  it.movie = it.movie || new Movie(it.ftr);
+  $('seek').max = Math.max(0, it.movie.frameCount - 1);
+  $('empty').hidden = true;
+  const counts = {};
+  const walk = ts => ts.forEach(t => { counts[t.tag] = (counts[t.tag] || 0) + 1; if (t.tag === 'DefineSprite') walk(t.tags); });
+  walk(it.ftr.tags);
+  const [x, y, w, h] = it.ftr.rect;
+  $('info').textContent = `${it.source} / FTR ${it.id} · ${w / 20}×${h / 20} px · ${it.ftr.fps} fps · ${it.movie.frameCount} frames (${(it.movie.frameCount / it.ftr.fps).toFixed(2)} s) · ` +
+    Object.entries(counts).map(([k, v]) => `${k} ${v}`).join(' / ');
+  renderList();
+  $('bgsel').value = w === 8000 && h === 800 ? 'header' : 'movie';
+  resize();
+  seek(0);
+}
+
+function scale() { return Number($('scale').value); }
+
+function resize() {
+  if (!cur) return;
+  const [, , w, h] = cur.ftr.rect, s = scale(), dpr = window.devicePixelRatio || 1;
+  cv.width = Math.round(w / 20 * s * dpr); cv.height = Math.round(h / 20 * s * dpr);
+  cv.style.width = `${w / 20 * s}px`; cv.style.height = `${h / 20 * s}px`;
+  draw();
+}
+
+function drawBackground(W, H) {
+  const mode = $('bgsel').value;
+  if (mode === 'header') {
+    // UIFILE #42: Gradient(argb(255,9,74,116), argb(255,32,121,140), argb(255,5,111,90), 3)
+    const g = ctx.createLinearGradient(0, 0, W, 0);
+    g.addColorStop(0, 'rgb(9,74,116)'); g.addColorStop(0.5, 'rgb(32,121,140)'); g.addColorStop(1, 'rgb(5,111,90)');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  } else if (mode === 'movie') {
+    // The engine stores this color but SWF::render never paints it; shown here only as a viewing aid.
+    const c = cur.movie.bg || [0, 0, 0, 255];
+    ctx.fillStyle = css(c); ctx.fillRect(0, 0, W, H);
+  } else if (mode === 'checker') {
+    const s = 8 * (window.devicePixelRatio || 1);
+    for (let y = 0; y < H; y += s) for (let x = 0; x < W; x += s) {
+      ctx.fillStyle = ((x + y) / s) % 2 ? '#cfd3da' : '#f4f5f7';
+      ctx.fillRect(x, y, s, s);
+    }
+  } else {
+    ctx.fillStyle = mode; ctx.fillRect(0, 0, W, H);
+  }
+}
+
+function draw() {
+  if (!cur) return;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  drawBackground(cv.width, cv.height);
+  renderer.frame(cur.movie, scale() * (window.devicePixelRatio || 1));
+  $('frame').textContent = `${frame + 1} / ${cur.movie.frameCount}`;
+  $('seek').value = frame;
+}
+
+// Each advance renders one frame; seeking replays from the start.
+function seek(n) {
+  const mv = cur.movie;
+  mv.rewind();
+  for (let i = 0; i <= n; i++) mv.root.advance(mv, false, true);
+  frame = n;
+  draw();
+}
+
+function next() {
+  const mv = cur.movie, loop = $('loop').checked;
+  if (frame + 1 >= mv.frameCount && !loop) { setPlaying(false); return; }
+  mv.root.advance(mv, false, loop);
+  frame = (frame + 1) % mv.frameCount;
+  draw();
+}
+
+function setPlaying(p) {
+  playing = p && !!cur;
+  $('play').textContent = playing ? 'Pause' : 'Play';
+  if (playing) { last = performance.now(); acc = 0; requestAnimationFrame(tick); }
+}
+
+function tick(now) {
+  if (!playing) return;
+  acc += now - last; last = now;
+  const dt = 1000 / cur.ftr.fps;
+  while (acc >= dt) { acc -= dt; next(); if (!playing) return; }
+  requestAnimationFrame(tick);
+}
+
+function download(blob, name) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+function baseName() {
+  const stem = (cur.source || 'ftr').replace(/\.[^.]+$/, '');
+  return stem.endsWith(String(cur.id)) ? stem : `${stem}_${cur.id}`;
+}
+
+$('play').onclick = () => setPlaying(!playing);
+$('step').onclick = () => { setPlaying(false); if (cur) next(); };
+$('seek').oninput = e => { setPlaying(false); if (cur) seek(Number(e.target.value)); };
+$('scale').onchange = resize;
+$('bgsel').onchange = draw;
+window.addEventListener('resize', resize);
+$('png').onclick = () => cur && cv.toBlob(b => download(b, `${baseName()}_${String(frame + 1).padStart(4, '0')}.png`));
+// While recording, every control that changes the selection or the frame is disabled so the capture stays on one movie.
+function setRecordingLock(on) {
+  document.querySelectorAll('#list button, .controls button, .controls select, .controls input, #file').forEach(el => { el.disabled = on; });
+}
+
+$('webm').onclick = () => {
+  if (!cur || recording) return;
+  setPlaying(false);
+  seek(0);
+  const stream = cv.captureStream(0), track = stream.getVideoTracks()[0];
+  const rec = new MediaRecorder(stream, { mimeType: 'video/webm' });
+  const chunks = [], name = `${baseName()}.webm`;
+  rec.ondataavailable = e => chunks.push(e.data);
+  rec.onstop = () => { recording = null; setRecordingLock(false); download(new Blob(chunks, { type: 'video/webm' }), name); };
+  recording = rec; setRecordingLock(true);
+  rec.start();
+  const mv = cur.movie, dt = 1000 / cur.ftr.fps;
+  let n = 0;
+  // requestFrame() only schedules a capture, so each frame stays on the canvas for a full frame interval before the next draw.
+  const step = () => {
+    track.requestFrame();
+    setTimeout(() => {
+      if (++n >= mv.frameCount) { rec.stop(); return; }
+      mv.root.advance(mv, false, true); frame = n; draw();
+      step();
+    }, dt);
+  };
+  step();
+};
+
+const drop = $('drop');
+$('file').onchange = e => addFiles([...e.target.files]);
+drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
+drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('over'); addFiles([...e.dataTransfer.files]); });
+window.FTRPlayer = { addBuffers: async list => addFiles(list.map(([name, buf]) => ({ name, arrayBuffer: async () => buf }))) };
+</script>
+</body>
+</html>
