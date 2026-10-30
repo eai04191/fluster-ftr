@@ -62,3 +62,7 @@ The reverse engineering and the code were done with the help of Claude (Anthropi
 - Only Vista SP2 x86 was examined. Windows 7 has not been checked.
 - `DefineFont`, `DefineText` and texture brushes exist in the engine but appear in none of Vista's files, so they are not implemented.
 - The progress-dialog background is approximated as a three-color horizontal gradient.
+
+## License
+
+[CC0 1.0](LICENSE): dedicated to the public domain. Use, copy, modify and redistribute any of it, for any purpose, without asking or crediting. Windows, its DLLs and the animations inside them remain Microsoft's and are not covered.
