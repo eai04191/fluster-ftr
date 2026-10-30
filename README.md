@@ -27,19 +27,37 @@ The header animations are 400×40 px at 24 fps and loop. The Flare is 273.6×144
 
 ## Renders
 
-One loop of each animation, rendered by this player at 4× and encoded frame by frame (VP9 WebM):
+One loop of each animation, rendered by this player at 4× and encoded frame by frame (VP9 WebM). The headers are drawn over the progress dialog's gradient; the Flare over the movie's own background color. These are this player's output, not captures from Windows. The animations themselves are © Microsoft and are not covered by this repository's license. The source files are in [`docs/renders/`](docs/renders/).
 
-| Animation | File |
-| --- | --- |
-| Default | [shell32_200.webm](docs/renders/shell32_200.webm) |
-| Copy | [shell32_201.webm](docs/renders/shell32_201.webm) |
-| Move | [shell32_202.webm](docs/renders/shell32_202.webm) |
-| Apply properties | [shell32_203.webm](docs/renders/shell32_203.webm) |
-| Recycle | [shell32_204.webm](docs/renders/shell32_204.webm) |
-| Delete | [shell32_205.webm](docs/renders/shell32_205.webm) |
-| Explorer Flare | [shellstyle_200.webm](docs/renders/shellstyle_200.webm), [shellstyle_201.webm](docs/renders/shellstyle_201.webm) |
+### Default (`shell32.dll` FTR 200)
 
-The headers are drawn over the progress dialog's gradient; the Flare over the movie's own background color. These are this player's output, not captures from Windows. The animations themselves are © Microsoft and are not covered by this repository's license.
+https://github.com/user-attachments/assets/6d213c45-ff97-4828-a3fd-4cf42b7c3713
+
+### Copy (FTR 201)
+
+https://github.com/user-attachments/assets/99ea85bf-929e-44b3-8771-aaa1e4942e44
+
+### Move (FTR 202)
+
+https://github.com/user-attachments/assets/7aa013ac-c64a-4971-a424-afa56980b84a
+
+### Apply properties (FTR 203)
+
+https://github.com/user-attachments/assets/1119771e-4e2b-4ea7-b249-8ba7bad42a42
+
+### Recycle (FTR 204)
+
+https://github.com/user-attachments/assets/05b70f1c-656e-44e7-88b2-242f66d7d8ae
+
+### Delete (FTR 205)
+
+https://github.com/user-attachments/assets/3d497d36-813a-468b-be35-71ecffa80843
+
+### Explorer Flare (`shellstyle.dll` FTR 200 and 201)
+
+https://github.com/user-attachments/assets/b0bab33d-0e61-4de1-bfe5-f80fabf4734e
+
+https://github.com/user-attachments/assets/846f2ea7-a5f2-4687-bf5b-a4f99c102aac
 
 ## Getting the DLLs
 
