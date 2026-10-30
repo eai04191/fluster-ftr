@@ -9,6 +9,7 @@ Usage:
 Standard library only. The layout mirrors SWF::SWF::read in Vista's shell32.dll; see FORMAT.md.
 """
 import json
+import math
 import os
 import struct
 import sys
@@ -146,6 +147,8 @@ def read_tag(r):
 def parse(b):
     r = Reader(b)
     movie = {'rect': list(r.take('4i')), 'fps': r.take('d')}
+    if not (math.isfinite(movie['fps']) and movie['fps'] > 0):
+        raise ValueError('invalid frame rate %r' % movie['fps'])
     movie['tags'] = r.list(lambda: read_tag(r))
     if r.o != len(b):
         raise ValueError('%d trailing bytes' % (len(b) - r.o))
@@ -194,7 +197,7 @@ def main(argv):
             res = [(rid, b) for rid, b in res if str(rid) == argv[3]]
         if len(res) != 1:
             sys.exit('pick one resource id: %s' % ', '.join(str(rid) for rid, _ in ftr_resources(argv[2])))
-        json.dump(parse(res[0][1]), sys.stdout, indent=1)
+        json.dump(parse(res[0][1]), sys.stdout, indent=1, allow_nan=False)
         print()
 
 

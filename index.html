@@ -32,11 +32,13 @@ p.lead a { color: var(--accent); }
 .list button { border: 1px solid var(--line); background: var(--chip); color: var(--text); border-radius: 8px; padding: 6px 12px; font: inherit; cursor: pointer; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .list button[aria-pressed="true"] { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
 .stage { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
-.screen { overflow-x: auto; display: flex; justify-content: center; padding: 8px 0; }
+.screen { overflow-x: auto; padding: 8px 0; }
+.screen canvas { margin: 0 auto; }
 canvas { display: block; image-rendering: auto; }
 .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 12px; }
 .controls button, .controls select { font: inherit; border: 1px solid var(--line); background: var(--chip); color: var(--text); border-radius: 8px; padding: 4px 10px; cursor: pointer; }
-.controls label { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+.controls label { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; max-width: 100%; color: var(--muted); }
+.controls select { min-width: 0; max-width: 100%; }
 input[type=range] { flex: 1 1 200px; min-width: 0; accent-color: var(--accent); }
 .frame { font-variant-numeric: tabular-nums; color: var(--muted); min-width: 9ch; }
 .info { margin-top: 12px; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
@@ -477,6 +479,7 @@ function label(file, name, ftr) {
 }
 
 async function addFiles(files) {
+  if (recording) return;
   const errs = [];
   for (const f of files) {
     const buf = await f.arrayBuffer();
@@ -511,6 +514,7 @@ function renderList() {
     b.textContent = it.title;
     b.title = `${it.source} / FTR ${it.id}`;
     b.setAttribute('aria-pressed', String(cur === it));
+    b.disabled = !!recording;
     b.onclick = () => select(i);
     list.appendChild(b);
   });
@@ -601,7 +605,8 @@ function setPlaying(p) {
 
 function tick(now) {
   if (!playing) return;
-  acc += now - last; last = now;
+  // After the tab sleeps, resume from the current frame instead of drawing every missed frame.
+  acc = Math.min(acc + now - last, 250); last = now;
   const dt = 1000 / cur.ftr.fps;
   while (acc >= dt) { acc -= dt; next(); if (!playing) return; }
   requestAnimationFrame(tick);
@@ -632,9 +637,20 @@ function setRecordingLock(on) {
 
 $('webm').onclick = () => {
   if (!cur || recording) return;
+  if (typeof MediaRecorder === 'undefined' || !MediaRecorder.isTypeSupported('video/webm')) {
+    const div = document.createElement('div');
+    div.className = 'err';
+    div.textContent = 'This browser cannot record WebM.';
+    $('info').appendChild(div);
+    return;
+  }
   setPlaying(false);
   seek(0);
-  const stream = cv.captureStream(0), track = stream.getVideoTracks()[0];
+  // Where requestFrame() exists (Chromium) each draw is captured exactly once. Firefox has no requestFrame(),
+  // so it falls back to automatic capture at the movie's frame rate; each frame is still held for a full interval.
+  let stream = cv.captureStream(0), track = stream.getVideoTracks()[0];
+  const manual = typeof track.requestFrame === 'function';
+  if (!manual) { track.stop(); stream = cv.captureStream(cur.ftr.fps); track = stream.getVideoTracks()[0]; }
   const rec = new MediaRecorder(stream, { mimeType: 'video/webm' });
   const chunks = [], name = `${baseName()}.webm`;
   rec.ondataavailable = e => chunks.push(e.data);
@@ -645,7 +661,7 @@ $('webm').onclick = () => {
   let n = 0;
   // requestFrame() only schedules a capture, so each frame stays on the canvas for a full frame interval before the next draw.
   const step = () => {
-    track.requestFrame();
+    if (manual) track.requestFrame();
     setTimeout(() => {
       if (++n >= mv.frameCount) { rec.stop(); return; }
       mv.root.advance(mv, false, true); frame = n; draw();

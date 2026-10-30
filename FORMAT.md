@@ -113,7 +113,7 @@ ColorTransform           if hasColorTransform
 
 ## Playback (`SWF::Movie`)
 
-Definitions (DefineShape, DefineSprite) go into a global table by character ID. Every other tag is a command appended to the root timeline, or to the sprite's timeline when nested. Each timeline has a command index and four per-depth arrays: character, matrix, color transform, clip depth.
+Top-level definitions (DefineShape, DefineSprite) go into a global table by character ID (`SWF::SWF::addTag`). Every other top-level tag is a command on the root timeline. Inside a DefineSprite, `SWF::Movie::addTag` only appends `dynamic_cast<CommandTag*>(tag)`: a nested definition is never registered and leaves a null command that would crash at playback. Vista's files contain no nested definitions; the player ignores them. Each timeline has a command index and four per-depth arrays: character, matrix, color transform, clip depth.
 
 `advanceFrame(paused, loop)`, called once per frame:
 
