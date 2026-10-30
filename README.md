@@ -54,7 +54,7 @@ The analysis used the Japanese Windows Vista SP2 x86 DVD. Microsoft's symbol ser
 
 Fluster has two loaders. `parse()` reads genuine SWF. `read()` reads Fluster's own serialization of already-converted GDI+ objects: pens, brushes and `GraphicsPath` point arrays. FTR is the `read()` form. Disassembling `SWF::SWF::read`, every `Tag::read`, `Shape::render`, `Movie::advanceFrame` and `Movie::render` gave the layout and the playback rules in `FORMAT.md`. Where Fluster differs from Flash, the player follows Fluster: the order in which color transforms compose, path-gradient stop direction, sprite state shared per definition, and masks as one global GDI+ clip. All eight FTR resources in Vista SP2 parse to their last byte.
 
-The reverse engineering and the code were done with the help of Claude (Anthropic).
+All of the reverse engineering, code and documentation in this repository was done by Claude (Anthropic).
 
 ## Limitations
 
